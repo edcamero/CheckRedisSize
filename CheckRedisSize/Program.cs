@@ -1,34 +1,27 @@
 ﻿using System;
 using ServiceStack.Redis;
 using System.Text.RegularExpressions;
+using System.Collections.Generic;
 namespace CheckRedisSize
 {
     class Program
     {
+        public const float CONVERSION_CHECK = 1024f;
         public static string redisHost = "127.0.0.1";
         public static string port = "6379";
         public static double maxSize = 1;
         public static string mult = "bytes";
-        
+
         static void Main(string[] args)
         {
+
             
-            int separator = 0; 
-            Console.WriteLine();
             if (args.Length == 2)
-            {   separator = args[0].LastIndexOf(':');
-                if (separator == -1)
-                {
-                    redisHost = args[0];
-                }
-                else
-                {
-                    redisHost = args[0].Substring(0, separator);
-                    port = args[0].Substring(separator);
-                }
-                getLimitOfArguments(args[1]);
-                findlen();
-            }           
+            {
+                DefineHost(args[0]);
+                GetLimitOfArguments(args[1]);
+                CheckRedisSize();
+            }
             else
             {
                 Console.Error.Write("Argumentos Invalidos. ");
@@ -37,78 +30,83 @@ namespace CheckRedisSize
                 Console.WriteLine("<<SizeGreaterThan>>");
             }
         }
-        static void getLimitOfArguments(string limiteSize)
+        static void GetLimitOfArguments(string limitSize)
         {
-            Match digito = Regex.Match(limiteSize, "(\\d+)");
-            Match units = Regex.Match(limiteSize, @"^[a-zA-Z]+$");
+            Match digits = Regex.Match(limitSize, "(\\d+)");
+            Match measureUnit = Regex.Match(limitSize, "([a-z]+)");
 
-            string num = string.Empty;
-            if (digito.Success)
+            if (measureUnit.Success)
             {
-                maxSize = Int32.Parse(digito.Value);
+                mult = measureUnit.Value;
             }
-            if (units.Success)
+            if (digits.Success)
             {
-                mult = units.Value;
+                DefinMaxLimite(long.Parse(digits.Value));
             }
+
         }
 
         static double ConvertBytesToMegabytes(long bytes)
         {
-            return (bytes / 1024f) / 1024f;
+            return (bytes / CONVERSION_CHECK) / CONVERSION_CHECK;
         }
         static double ConvertBytesToKilobytes(long bytes)
         {
-            return (bytes / 1024f);
+            return (bytes / CONVERSION_CHECK);
         }
 
         static double ConvertMegabytesToBytes(long megabytes)
         {
-            return (megabytes * 1024f) * 1024f;
+            return (megabytes * CONVERSION_CHECK) * CONVERSION_CHECK;
         }
         static double ConvertKilobytesToBytes(long kilobytes)
         {
-            return (kilobytes * 1024f);
+            return (kilobytes * CONVERSION_CHECK);
         }
 
-        static void DefineMaxLimite()
+        static void DefinMaxLimite(long maxSizeArg)
         {
-            switch (mult){
-                case "kb":
-                    maxSize = ConvertBytesToKilobytes(maxSize);
+            switch (mult)
+            {
+                case "bytes":
+                    maxSize = maxSizeArg;
                     break;
-                
+                case "kb":
+                    maxSize = ConvertKilobytesToBytes(maxSizeArg);
+                    break;
+                case "mb":
+                    maxSize = ConvertMegabytesToBytes(maxSizeArg);
+                    break;
+                default:
+                    Console.WriteLine("Not an accepted unit");
+                    break;
+
+
             }
 
         }
 
 
-        static void findlen()
+
+
+        static void CheckRedisSize()
         {
             using (var redisClient = new RedisClient(redisHost, Convert.ToInt16(port)))
             {
-                var config = new RedisEndpoint
-                {
-                    Host = redisHost,
-                    Port = Int32.Parse(port),
-                };
 
-            
                 double totalsize = 0;
                 var keys = redisClient.GetAllKeys();
-                Console.WriteLine("...Download...");
-                Console.WriteLine("KEY"+"\t"+"SIZE"+ "\t\t\t" + "TLL");
+                Console.WriteLine(String.Format("|{0,10}|{1,15} |{2,22}|", "KEY", "SIZE", "TLL"));
                 foreach (string key in keys)
                 {
                     try
                     {
-                        byte[] bytarr = redisClient.Get(key);
-                        double kblen = ConvertBytesToKilobytes(bytarr.Length);
-                        double mblen = ConvertBytesToMegabytes(bytarr.Length);
-                        totalsize = totalsize + mblen;
-                        Console.WriteLine(key + "\t" + mblen + "\t" + redisClient.GetTimeToLive(key).Value.TotalSeconds+ "Seg.");
-                       
+                        long size = redisClient.GetStringCount(key);
+                        double kblen = ConvertBytesToKilobytes(size);
+                        double mblen = ConvertBytesToMegabytes(size);
 
+                        totalsize = totalsize + mblen;
+                        PrintRow(key, size, redisClient.GetTimeToLive(key).Value.TotalSeconds);
                     }
                     catch (Exception ex)
                     {
@@ -117,18 +115,68 @@ namespace CheckRedisSize
                             byte[][] bythsharr = redisClient.HGetAll(key);
                             double kblen = ConvertBytesToKilobytes(bythsharr.Length);
                             double mblen = ConvertBytesToMegabytes(bythsharr.Length);
-                            Console.WriteLine("Hash Key Name : " + key + " Key length in MB : " + mblen + " Key Length in Kb : " + kblen);
-                           
+                            PrintRow(key, bythsharr.Length, redisClient.GetTimeToLive(key).Value.TotalSeconds);
                         }
                         catch (Exception ex1)
                         {
+                            try
+                            {
+                                PrintRow(key, CalculateListSize(redisClient.GetAllItemsFromList(key)), redisClient.GetTimeToLive(key).Value.TotalSeconds);
+                            }
+                            catch (Exception ex2)
+                            {
+                                ;
+                                PrintRow(key, CalculateHastSetySize(redisClient.GetAllItemsFromSet(key)), redisClient.GetTimeToLive(key).Value.TotalSeconds);
 
+                            }
                         }
                     }
                 }
             }
+
+        }
+
+        static long CalculateListSize(List<string> list)
+        {
+            long sizeAllList = 0;
+            foreach (string item in list)
+            {
+                sizeAllList += item.Length;
+            }
+            return sizeAllList;
+        }
+
+        static long CalculateHastSetySize(HashSet<string> dictionary)
+        {
+            long sizeAllList = 0;
+            foreach (string item in dictionary)
+            {
+                sizeAllList += item.Length;
+            }
+            return sizeAllList;
+        }
+
+        static void PrintRow(string key, long size, double seconds)
+        {
+            if (maxSize < size)
+            {
+                Console.WriteLine(String.Format("|{0,10}|{1,10} bytes|{2,10} Seg.|", key, size, seconds));
+            }
+        }
+        static void DefineHost(String hostString)
+        {
+            int separator = 0;
+            separator = hostString.LastIndexOf(':');
+            if (separator == -1)
+            {
+                redisHost = hostString;
+            }
+            else
+            {
+                redisHost = hostString.Substring(0, separator);
+                port = hostString.Substring(separator);
+            }
         }
 
     }
-
 }
