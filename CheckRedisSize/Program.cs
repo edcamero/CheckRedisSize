@@ -7,27 +7,35 @@ namespace CheckRedisSize
     class Program
     {
         public const float CONVERSION_CHECK = 1024f;
+        public const string DELETE_COMMAND ="--delete";
+        public static bool isErasable = false;
         public static string redisHost = "127.0.0.1";
         public static string port = "6379";
         public static double maxSize = 1;
         public static string mult = "bytes";
 
+
         static void Main(string[] args)
         {
 
             
-            if (args.Length == 2)
+            if (args.Length > 2)
             {
                 DefineHost(args[0]);
                 GetLimitOfArguments(args[1]);
+                if(args.Length == 3 && args[2] == DELETE_COMMAND)
+                {
+                    isErasable = true;
+                }
                 CheckRedisSize();
+
             }
             else
             {
-                Console.Error.Write("Argumentos Invalidos. ");
-                Console.WriteLine("Dos argumentos necesarios:");
-                Console.WriteLine("<<RedisConnectionString>>");
-                Console.WriteLine("<<SizeGreaterThan>>");
+                Console.Error.Write("Invalid Arguments. ");
+                Console.WriteLine("Plus Two necessary arguments:");
+                Console.WriteLine("CheckRedisSize <RedisConnectionString> <maxSize>");
+                Console.WriteLine("CheckRedisSize <localhost> <int><'byte'|'kb'|'mb'>");
             }
         }
         static void GetLimitOfArguments(string limitSize)
@@ -176,6 +184,22 @@ namespace CheckRedisSize
                 redisHost = hostString.Substring(0, separator);
                 port = hostString.Substring(separator);
             }
+        }
+
+        static void DeleteKey(RedisClient redisClient, String key)
+        {
+            try
+            {
+                redisClient.Delete(key);
+                Console.WriteLine(String.Format("Key {0} deleted", key));
+
+            }
+            catch(Exception exception)
+            {
+                Console.WriteLine(String.Format("Error: {0}", exception.Message));
+            }
+           
+            
         }
 
     }
